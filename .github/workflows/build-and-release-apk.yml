@@ -1,0 +1,87 @@
+name: Build and Release APK
+
+on:
+  workflow_dispatch: 
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: true
+        default: 'main'
+  push:
+    tags:
+      - 'v*'  # バージョンタグ付きのプッシュ時に実行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout latest code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Set up JDK 1.17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Install Build Tools
+        run: sdkmanager --install "build-tools;36.0.0"
+
+      - name: Set PATH for Build Tools
+        run: echo "export PATH=\$ANDROID_HOME/build-tools/36.0.0:\$PATH" >> $GITHUB_ENV
+
+      - name: Build with Gradle
+        run: ./gradlew clean assembleRelease
+
+      - name: Verify APK build output
+        run: ls -l app/build/outputs/apk/release/
+
+      - name: Ensure release directory exists
+        run: mkdir -p app/build/outputs/apk/release/
+
+      - name: Create keystore file
+        run: echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > keystore.jks
+
+      - name: Sign APK manually
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+            --ks keystore.jks \
+            --ks-pass pass:${{ secrets.KEY_STORE_PASSWORD }} \
+            --ks-key-alias ${{ secrets.ORIENS }} \
+            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+            
+      - name: Get tag if exists
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Create Git Tag if missing
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        run: |
+          TAG_NAME="v$(date +'%Y.%m.%d-%H%M%S')"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "github-actions@github.com"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+
+      - name: Verify APK output before upload
+        run: ls -l app/build/outputs/apk/release/
+
+      - name: Rename signed APK
+        run: mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/app-release-signed.apk
+      
+      - name: Upload APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/app-release-signed.apk
+          tag_name: ${{ env.TAG_NAME }}
+          token: ${{ secrets.GITHUB_TOKEN }}
