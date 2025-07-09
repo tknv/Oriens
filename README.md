@@ -1,4 +1,5 @@
 ![Logo](app/src/main/res/drawable-xxhdpi/ic_launcher.png)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tknv/Oriens)
 
 # Oriens
 
